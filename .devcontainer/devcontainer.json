@@ -1,0 +1,12 @@
+{
+  "name": "TheEngine",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:18",
+  "postCreateCommand": "npm install && npx playwright install chromium --with-deps",
+  "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": { "label": "TheEngine", "onAutoForward": "openBrowser", "visibility": "public" }
+  },
+  "remoteEnv": {
+    "NODE_ENV": "development"
+  }
+}

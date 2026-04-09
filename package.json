@@ -1,0 +1,20 @@
+{
+  "name": "the-engine",
+  "version": "2.0.0",
+  "description": "A self-crawling web search engine",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "crawl": "node -e \"require('./crawler/crawlSettings').setAutoCrawl(true);\""
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "playwright": "^1.40.0",
+    "cheerio": "^1.0.0-rc.12",
+    "better-sqlite3": "^9.2.2",
+    "natural": "^6.10.0",
+    "axios": "^1.6.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
+  }
+}

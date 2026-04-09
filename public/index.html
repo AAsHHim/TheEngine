@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TheEngine — Self-Indexed Search</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --fg: #e8e8e8;
+      --muted: #888;
+      --accent: #00ff88;
+      --panel: #1a1a1a;
+      --err: #ff6b6b;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .loading-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 3px;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent), #00cc6a);
+      z-index: 1000;
+      transition: width 0.2s ease;
+      opacity: 0;
+    }
+    .loading-bar.active { opacity: 1; animation: loadPulse 1.2s ease infinite; }
+    @keyframes loadPulse {
+      0% { width: 12%; }
+      50% { width: 88%; }
+      100% { width: 35%; }
+    }
+
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem 6rem;
+      transition: transform 0.45s ease, opacity 0.35s ease;
+    }
+    .hero.compact {
+      min-height: auto;
+      padding: 1.25rem 1rem 0.5rem;
+      transform: translateY(-4vh);
+    }
+
+    .logo {
+      font-size: clamp(2.2rem, 8vw, 3.8rem);
+      font-weight: 700;
+      letter-spacing: 0.35em;
+      text-transform: uppercase;
+      margin: 0 0 0.5rem;
+      animation: glitch 4s infinite;
+    }
+    @keyframes glitch {
+      0%, 90%, 100% {
+        text-shadow: 0 0 0 transparent;
+      }
+      91% {
+        text-shadow: 2px 0 var(--accent), -2px 0 #00aa55;
+      }
+      93% {
+        text-shadow: -1px 0 #00aa55, 1px 0 var(--accent);
+      }
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin: 0 0 1.5rem;
+    }
+
+    .stats-bar {
+      color: var(--muted);
+      font-size: 0.8rem;
+      margin-bottom: 2rem;
+      text-align: center;
+      max-width: 90vw;
+    }
+    .stats-bar .accent { color: var(--accent); }
+
+    .search-wrap {
+      width: 100%;
+      max-width: 680px;
+      position: relative;
+    }
+    .search-row {
+      display: flex;
+      align-items: stretch;
+      gap: 0.5rem;
+      width: 100%;
+    }
+    .search-prefix {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 0.65rem;
+      background: var(--panel);
+      border: 1px solid #333;
+      border-right: none;
+      border-radius: 4px 0 0 4px;
+      color: var(--accent);
+    }
+    .search-prefix .icon-search {
+      display: block;
+      flex-shrink: 0;
+    }
+    .search-input {
+      flex: 1;
+      min-width: 0;
+      background: var(--panel);
+      border: 1px solid #333;
+      border-left: none;
+      border-right: none;
+      color: var(--fg);
+      font-family: inherit;
+      font-size: 1rem;
+      padding: 0.85rem 0.75rem;
+      outline: none;
+    }
+    .search-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent), 0 0 18px rgba(0, 255, 136, 0.25);
+    }
+    .search-btn {
+      background: var(--panel);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      font-family: inherit;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      padding: 0 1rem;
+      cursor: pointer;
+      border-radius: 0 4px 4px 0;
+      text-transform: uppercase;
+      font-size: 0.8rem;
+    }
+    .search-btn:hover { background: rgba(0, 255, 136, 0.12); }
+
+    .tagline {
+      margin-top: 1.25rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+      text-align: center;
+    }
+
+    .suggest {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 100%;
+      margin-top: 4px;
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 4px;
+      max-height: 220px;
+      overflow-y: auto;
+      z-index: 50;
+      display: none;
+    }
+    .suggest.open { display: block; }
+    .suggest-item {
+      padding: 0.55rem 0.75rem;
+      cursor: pointer;
+      border-bottom: 1px solid #1f1f1f;
+      font-size: 0.85rem;
+    }
+    .suggest-item:last-child { border-bottom: none; }
+    .suggest-item:hover, .suggest-item.active {
+      background: rgba(0, 255, 136, 0.08);
+      color: var(--accent);
+    }
+
+    .results {
+      width: 100%;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 0 1rem 5rem;
+      display: none;
+    }
+    .results.visible { display: block; }
+
+    .results-head {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .result-card {
+      position: relative;
+      background: #0f0f0f;
+      border: 1px solid #2a2a2a;
+      border-left: 3px solid var(--accent);
+      padding: 1rem 1.1rem;
+      margin-bottom: 1rem;
+      transition: background 0.2s, box-shadow 0.2s, transform 0.2s;
+    }
+    .result-card:hover {
+      background: #121212;
+      box-shadow: 0 0 0 1px rgba(0, 255, 136, 0.35);
+      transform: translateY(-2px);
+    }
+    .result-title {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin: 0 0 0.35rem;
+    }
+    .result-url {
+      font-size: 0.75rem;
+      color: var(--muted);
+      word-break: break-all;
+      margin-bottom: 0.5rem;
+    }
+    .result-desc {
+      color: #c4c4c4;
+      font-size: 0.85rem;
+    }
+    .result-meta {
+      margin-top: 0.65rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    .score-badge {
+      position: absolute;
+      top: 0.65rem;
+      right: 0.65rem;
+      font-size: 0.7rem;
+      color: var(--muted);
+      border: 1px solid #333;
+      padding: 0.15rem 0.4rem;
+      border-radius: 2px;
+    }
+
+    .empty-state, .error-state {
+      padding: 1.5rem;
+      border: 1px dashed #333;
+      color: var(--muted);
+      text-align: center;
+    }
+    .error-state {
+      border-color: rgba(255, 107, 107, 0.5);
+      color: #ffb4b4;
+      background: rgba(255, 80, 80, 0.06);
+    }
+
+    .cursor-blink::after {
+      content: "";
+      display: inline-block;
+      width: 2px;
+      height: 1em;
+      margin-left: 0.35em;
+      background: var(--accent);
+      vertical-align: text-bottom;
+      animation: blink 1s step-end infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid #444;
+      color: var(--fg);
+      font-family: inherit;
+      font-size: 0.85rem;
+      padding: 0.45rem 0.75rem;
+      cursor: pointer;
+    }
+    .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-ghost .back-chevron {
+      display: inline-block;
+      width: 0.5em;
+      height: 0.5em;
+      border-left: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      transform: rotate(45deg);
+      margin-right: 0.4em;
+      vertical-align: middle;
+      margin-bottom: 0.1em;
+    }
+
+    .crawler-widget {
+      position: fixed;
+      right: 1rem;
+      bottom: 1rem;
+      z-index: 100;
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      max-width: min(92vw, 280px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    }
+    .crawler-head {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.6rem 0.75rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 1.5s ease infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.45; transform: scale(0.9); }
+    }
+    .crawler-body {
+      display: none;
+      padding: 0 0.75rem 0.75rem;
+      color: var(--muted);
+      border-top: 1px solid #222;
+    }
+    .crawler-widget.expanded .crawler-body { display: block; }
+
+    .crawl-panel {
+      width: 100%;
+      max-width: 680px;
+      margin-top: 2rem;
+      padding: 1rem 1.1rem;
+      background: var(--panel);
+      border: 1px solid #333;
+      border-radius: 4px;
+      text-align: left;
+    }
+    .crawl-panel h2 {
+      margin: 0 0 0.75rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    .crawl-textarea {
+      width: 100%;
+      min-height: 88px;
+      background: #0d0d0d;
+      border: 1px solid #333;
+      color: var(--fg);
+      font-family: inherit;
+      font-size: 0.85rem;
+      padding: 0.6rem 0.65rem;
+      border-radius: 3px;
+      resize: vertical;
+      margin-bottom: 0.75rem;
+    }
+    .crawl-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(0, 255, 136, 0.35);
+    }
+    .crawl-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+    .btn-crawl {
+      background: #0d0d0d;
+      border: 1px solid #444;
+      color: var(--fg);
+      font-family: inherit;
+      font-size: 0.8rem;
+      padding: 0.45rem 0.75rem;
+      cursor: pointer;
+      border-radius: 3px;
+    }
+    .btn-crawl.primary {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .btn-crawl:hover { border-color: var(--accent); color: var(--accent); }
+    .crawl-auto {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      user-select: none;
+    }
+    .crawl-auto input { accent-color: var(--accent); }
+    .crawl-help {
+      font-size: 0.72rem;
+      color: var(--muted);
+      line-height: 1.45;
+      margin: 0;
+    }
+    .crawl-help code { color: #b0e0c8; }
+
+    @media (max-width: 640px) {
+      .search-row { flex-wrap: wrap; }
+      .search-prefix { border-radius: 4px 0 0 0; }
+      .search-input { border: 1px solid #333; border-radius: 0; }
+      .search-btn { width: 100%; border-radius: 0 0 4px 4px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="loadingBar" class="loading-bar" aria-hidden="true"></div>
+
+  <main>
+    <section class="hero" id="hero">
+      <h1 class="logo">TheEngine</h1>
+      <p class="subtitle">// WEB CRAWLER v2.0 — SELF-INDEXED</p>
+      <div class="stats-bar" id="statsBar">
+        Indexed: <span class="accent" id="statPages">0</span> pages |
+        Queue: <span class="accent" id="statQueue">0</span> |
+        Mode: <span class="accent" id="statMode">—</span> |
+        Fetch: <span class="accent" id="statFetch">—</span>
+      </div>
+
+      <div class="search-wrap">
+        <div class="search-row">
+          <span class="search-prefix" aria-hidden="true" title="Search">
+            <svg class="icon-search" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
+              <path d="M20 20l-4.5-4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <input
+            type="text"
+            id="q"
+            class="search-input"
+            placeholder="Search the index..."
+            autocomplete="off"
+            aria-autocomplete="list"
+            aria-controls="suggestList"
+            aria-expanded="false"
+            role="searchbox"
+            inputmode="search"
+          />
+          <button type="button" class="search-btn" id="btnSearch">Search</button>
+        </div>
+        <div id="suggestList" class="suggest" role="listbox"></div>
+      </div>
+      <p class="tagline">No middlemen. Pages found by our crawler, ranked by us.</p>
+
+      <div class="crawl-panel" id="crawlPanel">
+        <h2>Crawl control</h2>
+        <textarea
+          id="crawlUrls"
+          class="crawl-textarea"
+          placeholder="https://example.com&#10;one URL per line — or enable Auto and use env seeds / Default seeds"
+          aria-label="URLs to crawl"
+        ></textarea>
+        <div class="crawl-actions">
+          <button type="button" class="btn-crawl primary" id="btnEnqueue">Add to queue</button>
+          <button type="button" class="btn-crawl" id="btnRunBatch">Run batch (3)</button>
+          <button type="button" class="btn-crawl" id="btnSeedDefaults">Default seeds</button>
+          <label class="crawl-auto">
+            <input type="checkbox" id="chkAutoCrawl" />
+            Auto crawl (background)
+          </label>
+        </div>
+        <p class="crawl-help">
+          <strong>Manual:</strong> add URLs, then <em>Run batch</em> to process three at a time (no endless loop).
+          <strong>Auto:</strong> the scheduler keeps draining the queue on an interval.
+          <strong>Chromium</strong> (fetch mode <code>playwright</code>) runs a real browser so JavaScript-heavy pages index correctly.
+          Set <code>CRAWL_FETCH_MODE=http</code> on the server to use plain HTTP only — no browser binary, but many SPAs will be empty.
+        </p>
+      </div>
+    </section>
+
+    <section class="results" id="results">
+      <div class="toolbar">
+        <button type="button" class="btn-ghost" id="btnNewSearch"><span class="back-chevron" aria-hidden="true"></span> New search</button>
+      </div>
+      <div class="results-head" id="resultsHead"></div>
+      <div id="resultsBody"></div>
+    </section>
+  </main>
+
+  <aside class="crawler-widget" id="crawlerWidget">
+    <div class="crawler-head" id="crawlerHead">
+      <span class="pulse-dot" aria-hidden="true"></span>
+      <span id="widgetModeLabel">CRAWLER</span>
+      <span style="margin-left:auto;color:var(--accent)" id="widgetPages">0</span>
+    </div>
+    <div class="crawler-body" id="crawlerBody">
+      <div>Queue: <span id="widgetQueue">0</span></div>
+      <div style="margin-top:0.35rem;word-break:break-all;font-size:0.7rem;">Last: <span id="widgetLast">—</span></div>
+    </div>
+  </aside>
+
+  <script>
+    (function () {
+      const $ = (id) => document.getElementById(id);
+      const hero = $("hero");
+      const results = $("results");
+      const q = $("q");
+      const suggestList = $("suggestList");
+      const loadingBar = $("loadingBar");
+      const resultsHead = $("resultsHead");
+      const resultsBody = $("resultsBody");
+      const crawlerWidget = $("crawlerWidget");
+      const crawlUrls = $("crawlUrls");
+      const chkAutoCrawl = $("chkAutoCrawl");
+
+      let suggestItems = [];
+      let activeIdx = -1;
+      let suggestOpen = false;
+      let updatingAutoCheckbox = false;
+
+      function fmtNum(n) {
+        try { return Number(n).toLocaleString(); } catch { return String(n); }
+      }
+
+      function relTime(iso) {
+        if (!iso) return "unknown";
+        const t = new Date(iso).getTime();
+        if (Number.isNaN(t)) return "unknown";
+        const s = Math.floor((Date.now() - t) / 1000);
+        if (s < 60) return s + " sec ago";
+        const m = Math.floor(s / 60);
+        if (m < 60) return m + " min ago";
+        const h = Math.floor(m / 60);
+        if (h < 24) return h + " hours ago";
+        const d = Math.floor(h / 24);
+        if (d < 7) return d + " days ago";
+        const w = Math.floor(d / 7);
+        return w + " weeks ago";
+      }
+
+      async function refreshStats() {
+        try {
+          const res = await fetch("/stats");
+          if (!res.ok) throw new Error("stats failed");
+          const data = await res.json();
+          $("statPages").textContent = fmtNum(data.pageCount);
+          $("statQueue").textContent = fmtNum(data.queueSize);
+          $("statMode").textContent = data.autoCrawl ? "AUTO" : "MANUAL";
+          $("statFetch").textContent = data.fetchMode || "—";
+          $("widgetPages").textContent = fmtNum(data.pageCount);
+          $("widgetQueue").textContent = fmtNum(data.queueSize);
+          $("widgetModeLabel").textContent = data.autoCrawl ? "AUTO" : "MANUAL";
+          if (typeof data.autoCrawl === "boolean") {
+            updatingAutoCheckbox = true;
+            chkAutoCrawl.checked = data.autoCrawl;
+            updatingAutoCheckbox = false;
+          }
+        } catch (_) { /* ignore */ }
+        try {
+          const res = await fetch("/crawl/status");
+          if (res.ok) {
+            const st = await res.json();
+            const last = st.lastCrawledUrl || "—";
+            $("widgetLast").textContent = last.length > 80 ? last.slice(0, 80) + "…" : last;
+          }
+        } catch (_) { /* ignore */ }
+      }
+
+      refreshStats();
+      setInterval(refreshStats, 5000);
+
+      crawlerWidget.querySelector("#crawlerHead").addEventListener("click", () => {
+        crawlerWidget.classList.toggle("expanded");
+      });
+
+      chkAutoCrawl.addEventListener("change", async () => {
+        if (updatingAutoCheckbox) return;
+        const auto = chkAutoCrawl.checked;
+        try {
+          const res = await fetch("/crawl/mode", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ auto }),
+          });
+          if (!res.ok) throw new Error("mode failed");
+          await refreshStats();
+        } catch (e) {
+          chkAutoCrawl.checked = !auto;
+          alert(String(e.message || e));
+        }
+      });
+
+      $("btnEnqueue").addEventListener("click", async () => {
+        const lines = crawlUrls.value
+          .split(/\n/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (!lines.length) {
+          alert("Add at least one URL.");
+          return;
+        }
+        try {
+          const res = await fetch("/crawl/urls", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ urls: lines }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "enqueue failed");
+          crawlUrls.value = "";
+          await refreshStats();
+          alert("Enqueued " + (data.enqueued || 0) + " URL(s).");
+        } catch (e) {
+          alert(String(e.message || e));
+        }
+      });
+
+      $("btnRunBatch").addEventListener("click", async () => {
+        try {
+          const res = await fetch("/crawl/run-batch", { method: "POST" });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "batch failed");
+          await refreshStats();
+        } catch (e) {
+          alert(String(e.message || e));
+        }
+      });
+
+      $("btnSeedDefaults").addEventListener("click", async () => {
+        try {
+          const res = await fetch("/crawl/seed", { method: "POST" });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "seed failed");
+          await refreshStats();
+          alert(data.message || "Seeds enqueued.");
+        } catch (e) {
+          alert(String(e.message || e));
+        }
+      });
+
+      function closeSuggest() {
+        suggestList.classList.remove("open");
+        suggestList.innerHTML = "";
+        suggestItems = [];
+        activeIdx = -1;
+        suggestOpen = false;
+        q.setAttribute("aria-expanded", "false");
+      }
+
+      function renderSuggest(titles) {
+        suggestList.innerHTML = "";
+        suggestItems = titles.map((t, i) => {
+          const div = document.createElement("div");
+          div.className = "suggest-item";
+          div.setAttribute("role", "option");
+          div.dataset.idx = String(i);
+          div.textContent = t;
+          div.addEventListener("mousedown", (e) => {
+            e.preventDefault();
+            q.value = t;
+            closeSuggest();
+            doSearch();
+          });
+          suggestList.appendChild(div);
+          return div;
+        });
+        if (titles.length) {
+          suggestList.classList.add("open");
+          suggestOpen = true;
+          q.setAttribute("aria-expanded", "true");
+        } else {
+          closeSuggest();
+        }
+      }
+
+      let suggestTimer = null;
+      q.addEventListener("input", () => {
+        clearTimeout(suggestTimer);
+        const v = q.value.trim();
+        if (v.length < 1) {
+          closeSuggest();
+          return;
+        }
+        suggestTimer = setTimeout(async () => {
+          try {
+            const res = await fetch("/suggest?q=" + encodeURIComponent(v));
+            if (!res.ok) throw new Error("suggest failed");
+            const titles = await res.json();
+            renderSuggest(Array.isArray(titles) ? titles : []);
+            highlightActive();
+          } catch {
+            closeSuggest();
+          }
+        }, 180);
+      });
+
+      function highlightActive() {
+        const nodes = suggestList.querySelectorAll(".suggest-item");
+        nodes.forEach((n, i) => {
+          n.classList.toggle("active", i === activeIdx);
+        });
+      }
+
+      q.addEventListener("keydown", (e) => {
+        if (!suggestOpen || !suggestItems.length) {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            doSearch();
+          }
+          return;
+        }
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          activeIdx = Math.min(activeIdx + 1, suggestItems.length - 1);
+          highlightActive();
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          activeIdx = Math.max(activeIdx - 1, 0);
+          highlightActive();
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          if (activeIdx >= 0 && suggestItems[activeIdx]) {
+            q.value = suggestItems[activeIdx].textContent;
+          }
+          closeSuggest();
+          doSearch();
+        } else if (e.key === "Escape") {
+          closeSuggest();
+        }
+      });
+
+      document.addEventListener("click", (e) => {
+        if (!e.target.closest(".search-wrap")) closeSuggest();
+      });
+
+      function setLoading(on) {
+        loadingBar.classList.toggle("active", on);
+        loadingBar.style.opacity = on ? "1" : "0";
+      }
+
+      async function doSearch() {
+        const query = q.value.trim();
+        if (!query) return;
+        closeSuggest();
+        setLoading(true);
+        resultsBody.innerHTML = '<p class="cursor-blink">Searching</p>';
+        results.classList.add("visible");
+        hero.classList.add("compact");
+        resultsHead.textContent = "";
+
+        try {
+          const res = await fetch("/search?q=" + encodeURIComponent(query) + "&limit=20");
+          const data = await res.json();
+          setLoading(false);
+
+          if (!res.ok) {
+            throw new Error(data && data.error ? data.error : "Search failed");
+          }
+
+          if (!Array.isArray(data)) {
+            throw new Error("Unexpected response");
+          }
+
+          resultsHead.textContent = "// " + data.length + ' results for "' + query + '"';
+
+          if (data.length === 0) {
+            resultsBody.innerHTML =
+              '<div class="empty-state">// NO RESULTS — crawler may not have indexed this yet</div>';
+            return;
+          }
+
+          resultsBody.innerHTML = data
+            .map(function (r) {
+              const esc = function (s) {
+                return String(s == null ? "" : s)
+                  .replace(/&/g, "&amp;")
+                  .replace(/</g, "&lt;")
+                  .replace(/"/g, "&quot;");
+              };
+              const title = esc(r.title || r.url);
+              const url = esc(r.url);
+              const desc = esc(r.description || "");
+              const score = typeof r.score === "number" ? r.score.toFixed(3) : esc(r.score);
+              const when = relTime(r.crawledAt);
+              return (
+                '<article class="result-card">' +
+                '<span class="score-badge">' + score + "</span>" +
+                '<h2 class="result-title"><a href="' +
+                url +
+                '" target="_blank" rel="noopener">' +
+                title +
+                "</a></h2>" +
+                '<div class="result-url">' +
+                url +
+                "</div>" +
+                (desc ? '<p class="result-desc">' + desc + "</p>" : "") +
+                '<div class="result-meta">indexed ' +
+                when +
+                "</div>" +
+                "</article>"
+              );
+            })
+            .join("");
+        } catch (err) {
+          setLoading(false);
+          resultsHead.textContent = "// ERROR";
+          resultsBody.innerHTML =
+            '<div class="error-state">' + String(err.message || err) + "</div>";
+        }
+      }
+
+      $("btnSearch").addEventListener("click", doSearch);
+      $("btnNewSearch").addEventListener("click", () => {
+        results.classList.remove("visible");
+        hero.classList.remove("compact");
+        resultsBody.innerHTML = "";
+        resultsHead.textContent = "";
+        q.value = "";
+        q.focus();
+      });
+    })();
+  </script>
+</body>
+</html>
