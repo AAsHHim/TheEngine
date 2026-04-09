@@ -5,9 +5,11 @@ if (typeof globalThis.File === 'undefined') {
 
 require('dotenv').config();
 
+const http = require('http');
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
+const WebSocket = require('ws');
 
 const {
   getStats,
@@ -23,9 +25,11 @@ const { scheduler } = require('./crawler/scheduler');
 const { crawler } = require('./crawler/crawler');
 const { queryEngine } = require('./search/query');
 const { getFetchMode } = require('./crawler/crawlSettings');
-const { ProxyEngine } = require('./proxy/proxy');
+const { ProxyEngine, AXIOS_HEADERS } = require('./proxy/proxy');
 
 const proxyEngine = new ProxyEngine();
+
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 if (process.env.AUTO_CRAWL === 'true') {
   initSeeds();
@@ -34,24 +38,81 @@ if (process.env.AUTO_CRAWL === 'true') {
 const app = express();
 app.set('trust proxy', 1);
 
-/** Proxy routes before other middleware so they are never shadowed. */
-app.use((req, res, next) => {
-  if (req.method !== 'GET') return next();
-  const p = req.path;
-  if (p === '/proxy' || p === '/proxy/') {
-    return handleProxy(req, res, {}).catch((err) => handleProxyError(res, req, err));
-  }
-  if (p === '/proxy/raw' || p === '/proxy/raw/') {
-    return handleProxy(req, res, { forceRaw: true }).catch((err) => handleProxyError(res, req, err));
-  }
-  next();
-});
-
-app.use(cors());
-app.use(express.json());
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '10mb' }));
 
 function getBaseProxyUrl(req) {
   return `${req.protocol}://${req.get('host')}`;
+}
+
+/** Hop-by-hop and values we replace server-side (cookie jar, safe encoding). */
+const SKIP_FORWARD_HEADER = new Set([
+  'host',
+  'connection',
+  'content-length',
+  'transfer-encoding',
+  'accept-encoding',
+  'cookie',
+]);
+
+/**
+ * Forward almost all browser headers so sites like Discord keep X-Super-Properties,
+ * X-Discord-Locale, sec-fetch-*, authorization, etc. Strip Cookie (use server jar).
+ */
+function forwardBrowserHeaders(req) {
+  const out = {};
+  for (const [key, val] of Object.entries(req.headers)) {
+    if (SKIP_FORWARD_HEADER.has(key.toLowerCase())) continue;
+    if (val === undefined) continue;
+    out[key] = Array.isArray(val) ? val.join(', ') : val;
+  }
+  return out;
+}
+
+/** HTML/CSS/asset fetches through GET /proxy — browser defaults + client hints. */
+function mergeUpstreamHeadersForPage(req) {
+  return {
+    ...AXIOS_HEADERS,
+    ...forwardBrowserHeaders(req),
+    'accept-encoding': AXIOS_HEADERS['accept-encoding'],
+  };
+}
+
+/** JSON/API through /proxy/api — same, plus target Origin/Referer; drop Upgrade header. */
+function mergeUpstreamHeadersForApi(req, targetUrl) {
+  const t = new URL(targetUrl);
+  const origin = `${t.protocol}//${t.host}`;
+  const merged = {
+    ...AXIOS_HEADERS,
+    ...forwardBrowserHeaders(req),
+    origin,
+    referer: `${t.origin}/`,
+    'accept-encoding': AXIOS_HEADERS['accept-encoding'],
+  };
+  delete merged['upgrade-insecure-requests'];
+  return merged;
+}
+
+function buildPostBody(req) {
+  const ct = req.get('content-type') || '';
+  if (ct.includes('application/json') && req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+    return { data: JSON.stringify(req.body), contentType: 'application/json; charset=utf-8' };
+  }
+  if (typeof req.body === 'object' && req.body !== null && !Buffer.isBuffer(req.body)) {
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(req.body)) {
+      if (Array.isArray(v)) v.forEach((x) => params.append(k, String(x)));
+      else params.append(k, String(v));
+    }
+    return { data: params.toString(), contentType: 'application/x-www-form-urlencoded; charset=utf-8' };
+  }
+  if (typeof req.body === 'string') {
+    return { data: req.body, contentType: ct || 'text/plain; charset=utf-8' };
+  }
+  if (Buffer.isBuffer(req.body)) {
+    return { data: req.body, contentType: ct || 'application/octet-stream' };
+  }
+  return { data: req.body, contentType: ct || 'application/octet-stream' };
 }
 
 function isBinaryAssetPath(urlStr) {
@@ -71,7 +132,49 @@ function isCssPath(urlStr) {
   }
 }
 
-async function handleProxy(req, res, opts = {}) {
+function isHtmlCt(ct) {
+  return /text\/html/i.test(ct || '');
+}
+
+function isCssCt(ct) {
+  return /text\/css/i.test(ct || '');
+}
+
+function isJsonCt(ct) {
+  const c = String(ct || '').toLowerCase();
+  return c.includes('json') || c.includes('application/ld+json');
+}
+
+async function sendFetchedBufferAsProxy(req, res, r, rawParam) {
+  const ct = r.contentType || '';
+  const finalUrl = r.finalUrl || rawParam;
+  const base = getBaseProxyUrl(req);
+
+  if (isHtmlCt(ct)) {
+    const html = proxyEngine.bytesToText(r.buffer, ct);
+    const out = proxyEngine.rewriteHtml(html, finalUrl, base);
+    res.setHeader('X-Powered-By', 'TheEngine-Proxy');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(out);
+  }
+  if (isCssCt(ct)) {
+    const css = proxyEngine.bytesToText(r.buffer, ct);
+    const out = proxyEngine.rewriteCss(css, finalUrl, base);
+    res.setHeader('X-Powered-By', 'TheEngine-Proxy');
+    res.setHeader('Content-Type', 'text/css; charset=utf-8');
+    return res.send(out);
+  }
+  if (isJsonCt(ct)) {
+    res.setHeader('X-Powered-By', 'TheEngine-Proxy');
+    res.setHeader('Content-Type', ct.split(';')[0] || 'application/json');
+    return res.send(r.buffer);
+  }
+  res.setHeader('X-Powered-By', 'TheEngine-Proxy');
+  res.setHeader('Content-Type', ct || 'application/octet-stream');
+  return res.send(r.buffer);
+}
+
+async function handleProxyGet(req, res, opts = {}) {
   const forceRaw = Boolean(opts.forceRaw);
   try {
     const rawParam = proxyEngine.decodeProxyUrl(req.query.url);
@@ -80,12 +183,14 @@ async function handleProxy(req, res, opts = {}) {
     }
 
     const wantRaw = forceRaw || req.query.raw === '1';
+    const fwd = mergeUpstreamHeadersForPage(req);
+
     if (wantRaw || isBinaryAssetPath(rawParam)) {
-      return proxyEngine.pipeRawResponse(rawParam, res);
+      return proxyEngine.pipeRawResponse(rawParam, res, { headers: fwd });
     }
 
     if (isCssPath(rawParam)) {
-      const tr = await proxyEngine.fetchTextResource(rawParam);
+      const tr = await proxyEngine.fetchTextResource(rawParam, { headers: fwd });
       if (!tr.ok) {
         res.setHeader('X-Powered-By', 'TheEngine-Proxy');
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -93,21 +198,25 @@ async function handleProxy(req, res, opts = {}) {
           .status(502)
           .send(proxyEngine.buildErrorPageHtml(rawParam, tr.error || 'fetch failed'));
       }
-      const rewritten = proxyEngine.rewriteCss(tr.text, rawParam, getBaseProxyUrl(req));
+      const rewritten = proxyEngine.rewriteCss(tr.text, tr.finalUrl || rawParam, getBaseProxyUrl(req));
       res.setHeader('X-Powered-By', 'TheEngine-Proxy');
       res.setHeader('Content-Type', 'text/css; charset=utf-8');
       return res.send(rewritten);
     }
 
-    const page = await proxyEngine.fetchPage(rawParam);
-    const finalUrl = page.finalUrl || rawParam;
-    const out = proxyEngine.rewriteHtml(page.html, finalUrl, getBaseProxyUrl(req));
-    res.setHeader('X-Powered-By', 'TheEngine-Proxy');
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    if (page.isError) {
-      return res.status(502).send(out);
+    const r = await proxyEngine.fetchUpstreamBuffer(rawParam, { headers: fwd });
+    if (r.blocked) {
+      res.setHeader('X-Powered-By', 'TheEngine-Proxy');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.status(403).send(proxyEngine.blockedPageHtml(rawParam));
     }
-    return res.send(out);
+    if (!r.ok) {
+      res.setHeader('X-Powered-By', 'TheEngine-Proxy');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.status(502).send(proxyEngine.buildErrorPageHtml(rawParam, r.error || 'fetch failed'));
+    }
+
+    return sendFetchedBufferAsProxy(req, res, r, rawParam);
   } catch (err) {
     const fallbackUrl = proxyEngine.decodeProxyUrl(req.query.url) || '';
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -116,6 +225,127 @@ async function handleProxy(req, res, opts = {}) {
       .status(502)
       .send(proxyEngine.buildErrorPageHtml(fallbackUrl, String(err.message || err)));
   }
+}
+
+async function handleProxyPost(req, res) {
+  try {
+    const rawParam = proxyEngine.decodeProxyUrl(req.query.url);
+    if (!rawParam || !/^https?:\/\//i.test(rawParam)) {
+      return res.status(400).type('text/plain').send('Invalid url');
+    }
+
+    const { data, contentType } = buildPostBody(req);
+    const fwd = mergeUpstreamHeadersForPage(req);
+    fwd['content-type'] = contentType;
+
+    const result = await proxyEngine.singleHopFetch(rawParam, {
+      method: 'POST',
+      body: data,
+      headers: fwd,
+    });
+
+    if (result.blocked) {
+      res.setHeader('X-Powered-By', 'TheEngine-Proxy');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.status(403).send(proxyEngine.blockedPageHtml(rawParam));
+    }
+    if (result.error) {
+      res.setHeader('X-Powered-By', 'TheEngine-Proxy');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res
+        .status(502)
+        .send(proxyEngine.buildErrorPageHtml(rawParam, String(result.error.message || result.error)));
+    }
+
+    if (REDIRECT_STATUSES.has(result.statusCode) && result.headers.location) {
+      const abs = new URL(result.headers.location, rawParam).href;
+      return res.redirect(302, `${getBaseProxyUrl(req)}/proxy?url=${encodeURIComponent(abs)}`);
+    }
+
+    if (result.statusCode >= 400 || result.data == null) {
+      res.setHeader('X-Powered-By', 'TheEngine-Proxy');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res
+        .status(502)
+        .send(proxyEngine.buildErrorPageHtml(rawParam, `HTTP ${result.statusCode}`));
+    }
+
+    const ct = result.headers['content-type'] || '';
+    const finalUrl = result.finalUrl || rawParam;
+    const buffer = Buffer.from(result.data);
+    return sendFetchedBufferAsProxy(req, res, { buffer, contentType: ct, finalUrl }, rawParam);
+  } catch (err) {
+    const fallbackUrl = proxyEngine.decodeProxyUrl(req.query.url) || '';
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('X-Powered-By', 'TheEngine-Proxy');
+    return res
+      .status(502)
+      .send(proxyEngine.buildErrorPageHtml(fallbackUrl, String(err.message || err)));
+  }
+}
+
+function filterApiResponseHeaders(res, upstreamHeaders) {
+  for (const [key, val] of Object.entries(upstreamHeaders)) {
+    const lk = key.toLowerCase();
+    if (lk === 'access-control-allow-origin') continue;
+    if (lk === 'content-security-policy') continue;
+    if (lk === 'x-frame-options') continue;
+    if (lk === 'set-cookie') continue;
+    if (lk === 'content-length') continue;
+    if (lk === 'transfer-encoding') continue;
+    if (val !== undefined) res.setHeader(key, val);
+  }
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('X-Powered-By', 'TheEngine-Proxy');
+}
+
+async function handleProxyApi(req, res) {
+  try {
+    const rawParam = proxyEngine.decodeProxyUrl(req.query.url);
+    if (!rawParam || !/^https?:\/\//i.test(rawParam)) {
+      return res.status(400).type('text/plain').send('Invalid url');
+    }
+    if (proxyEngine.isBlockedDomain(rawParam)) {
+      return res.status(403).type('text/plain').send('blocked');
+    }
+
+    const fwd = mergeUpstreamHeadersForApi(req, rawParam);
+
+    let bodyData;
+    if (req.method === 'POST') {
+      const built = buildPostBody(req);
+      bodyData = built.data;
+      fwd['content-type'] = built.contentType;
+    }
+
+    const out = await proxyEngine.proxyApiRequest(rawParam, {
+      method: req.method,
+      data: bodyData,
+      headers: fwd,
+    });
+
+    if (out.blocked) {
+      return res.status(403).type('text/plain').send('blocked');
+    }
+    if (out.error) {
+      return res.status(502).type('text/plain').send(String(out.error.message || out.error));
+    }
+
+    const axiosRes = out.response;
+    filterApiResponseHeaders(res, axiosRes.headers);
+    return res.status(axiosRes.status).send(Buffer.from(axiosRes.data));
+  } catch (err) {
+    return res.status(502).type('text/plain').send(String(err.message || err));
+  }
+}
+
+function handleProxyApiOptions(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  const reqHdr = req.get('Access-Control-Request-Headers');
+  res.setHeader('Access-Control-Allow-Headers', reqHdr || '*');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  return res.sendStatus(204);
 }
 
 function handleProxyError(res, req, err) {
@@ -127,6 +357,40 @@ function handleProxyError(res, req, err) {
     .status(502)
     .send(proxyEngine.buildErrorPageHtml(fallbackUrl, String(err.message || err)));
 }
+
+/** Proxy routes before other middleware so they are never shadowed. */
+app.use((req, res, next) => {
+  const p = req.path;
+  if (p === '/proxy' || p === '/proxy/') {
+    if (req.method === 'GET') {
+      return handleProxyGet(req, res, {}).catch((err) => handleProxyError(res, req, err));
+    }
+    if (req.method === 'POST') {
+      return handleProxyPost(req, res).catch((err) => handleProxyError(res, req, err));
+    }
+    return next();
+  }
+  if (p === '/proxy/raw' || p === '/proxy/raw/') {
+    if (req.method === 'GET') {
+      return handleProxyGet(req, res, { forceRaw: true }).catch((err) => handleProxyError(res, req, err));
+    }
+    return next();
+  }
+  if (p === '/proxy/api' || p === '/proxy/api/') {
+    if (req.method === 'OPTIONS') {
+      return handleProxyApiOptions(req, res);
+    }
+    if (req.method === 'GET' || req.method === 'POST') {
+      return handleProxyApi(req, res).catch((err) => {
+        if (!res.headersSent) res.status(502).send(String(err.message || err));
+      });
+    }
+    return next();
+  }
+  next();
+});
+
+app.use(cors());
 
 function normalizeUserUrl(raw) {
   let s = String(raw || '').trim();
@@ -366,8 +630,132 @@ app.get('/crawl/status', (req, res) => {
 });
 
 const port = Number(process.env.PORT) || 3000;
-app.listen(port, () => {
+
+const server = http.createServer(app);
+
+server.on('upgrade', (req, socket, head) => {
+  try {
+    const u = new URL(req.url || '/', 'http://localhost');
+    const pathname = u.pathname;
+    const prefix = '/proxy/ws/';
+    if (!pathname.startsWith(prefix)) {
+      socket.destroy();
+      return;
+    }
+    const encoded = pathname.slice(prefix.length);
+    if (!encoded) {
+      socket.destroy();
+      return;
+    }
+    let targetWsUrl;
+    try {
+      targetWsUrl = decodeURIComponent(encoded);
+    } catch {
+      socket.destroy();
+      return;
+    }
+    if (!/^wss?:\/\//i.test(targetWsUrl)) {
+      socket.destroy();
+      return;
+    }
+
+    const wss = new WebSocket.Server({ noServer: true });
+    wss.handleUpgrade(req, socket, head, (clientWs) => {
+      const protoHeader = req.headers['sec-websocket-protocol'];
+      const protocols = protoHeader
+        ? protoHeader.split(',').map((p) => p.trim()).filter(Boolean)
+        : [];
+
+      let targetOrigin;
+      try {
+        targetOrigin = new URL(targetWsUrl).origin;
+      } catch {
+        targetOrigin = undefined;
+      }
+
+      const upstream = new WebSocket(targetWsUrl, protocols.length ? protocols : undefined, {
+        headers: targetOrigin ? { Origin: targetOrigin } : {},
+      });
+
+      const pending = [];
+      const flushPending = () => {
+        while (pending.length && upstream.readyState === WebSocket.OPEN) {
+          const [data, isBinary] = pending.shift();
+          upstream.send(data, { binary: Boolean(isBinary) });
+        }
+      };
+
+      clientWs.on('message', (data, isBinary) => {
+        if (upstream.readyState === WebSocket.OPEN) {
+          upstream.send(data, { binary: Boolean(isBinary) });
+        } else {
+          pending.push([data, isBinary]);
+        }
+      });
+
+      upstream.on('open', () => {
+        flushPending();
+      });
+
+      upstream.on('message', (data, isBinary) => {
+        if (clientWs.readyState === WebSocket.OPEN) {
+          clientWs.send(data, { binary: Boolean(isBinary) });
+        }
+      });
+
+      clientWs.on('close', (code, reason) => {
+        try {
+          upstream.close(code, reason);
+        } catch {
+          try {
+            upstream.close();
+          } catch {
+            /* ignore */
+          }
+        }
+      });
+
+      upstream.on('close', (code, reason) => {
+        try {
+          clientWs.close(code, reason);
+        } catch {
+          try {
+            clientWs.close();
+          } catch {
+            /* ignore */
+          }
+        }
+      });
+
+      clientWs.on('error', () => {
+        try {
+          upstream.close();
+        } catch {
+          /* ignore */
+        }
+      });
+
+      upstream.on('error', () => {
+        try {
+          clientWs.close();
+        } catch {
+          /* ignore */
+        }
+      });
+    });
+  } catch {
+    try {
+      socket.destroy();
+    } catch {
+      /* ignore */
+    }
+  }
+});
+
+server.listen(port, () => {
   console.log(`[TheEngine] 🔍 Running at http://localhost:${port}`);
-  console.log(`[TheEngine] Proxy: GET /proxy, GET /proxy/raw`);
+  console.log(
+    `[TheEngine] Proxy: GET/POST /proxy, GET /proxy/raw, GET/POST /proxy/api, WS /proxy/ws/*`
+  );
   scheduler.init();
 });

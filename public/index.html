@@ -579,6 +579,10 @@
       border-radius: 3px;
     }
     .btn-crawl {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
       background: #0d0d0d;
       border: 1px solid #444;
       color: var(--fg);
@@ -587,6 +591,7 @@
       padding: 0.45rem 0.75rem;
       cursor: pointer;
       border-radius: 3px;
+      transition: border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
     }
     .btn-crawl.primary {
       font-weight: 600;
@@ -595,6 +600,47 @@
     .btn-crawl:focus-visible {
       border-color: var(--accent);
       color: var(--accent);
+    }
+    .btn-crawl.is-loading {
+      cursor: wait;
+      color: var(--accent);
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(0, 255, 136, 0.35);
+      animation: crawl-btn-glow 1.1s ease-in-out infinite;
+    }
+    .btn-crawl.is-loading::before {
+      content: "";
+      width: 0.75rem;
+      height: 0.75rem;
+      flex-shrink: 0;
+      border: 2px solid rgba(0, 255, 136, 0.25);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: crawl-btn-spin 0.65s linear infinite;
+    }
+    @keyframes crawl-btn-spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+    @keyframes crawl-btn-glow {
+      0%,
+      100% {
+        box-shadow: 0 0 0 1px rgba(0, 255, 136, 0.25);
+      }
+      50% {
+        box-shadow: 0 0 14px rgba(0, 255, 136, 0.35);
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .btn-crawl.is-loading {
+        animation: none;
+        box-shadow: 0 0 0 1px rgba(0, 255, 136, 0.35);
+      }
+      .btn-crawl.is-loading::before {
+        animation: none;
+        opacity: 0.7;
+      }
     }
     .crawl-help {
       font-size: 0.72rem;
@@ -759,7 +805,7 @@
           <textarea
             id="crawlUrls"
             class="crawl-textarea"
-            placeholder="discord.com&#10;https://example.org/page"
+            placeholder="https://example.org&#10;https://example.org/page"
             aria-label="Starting URLs to crawl"
           ></textarea>
           <div class="crawl-depth-row">
@@ -1153,13 +1199,32 @@
         }
       });
 
-      $("btnCrawlTarget").addEventListener("click", async () => {
+      const btnCrawlTarget = $("btnCrawlTarget");
+      const btnSeedDefaults = $("btnSeedDefaults");
+
+      function setCrawlActionLoading(btn, loading, labelWhileLoading) {
+        if (loading) {
+          btn.dataset.crawlLabel = btn.textContent;
+          btn.textContent = labelWhileLoading;
+          btn.classList.add("is-loading");
+          btn.disabled = true;
+          btn.setAttribute("aria-busy", "true");
+        } else {
+          if (btn.dataset.crawlLabel != null) btn.textContent = btn.dataset.crawlLabel;
+          delete btn.dataset.crawlLabel;
+          btn.classList.remove("is-loading");
+          btn.disabled = false;
+          btn.removeAttribute("aria-busy");
+        }
+      }
+
+      btnCrawlTarget.addEventListener("click", async () => {
         const lines = crawlUrls.value
           .split(/\n/)
           .map((s) => s.trim())
           .filter(Boolean);
         if (!lines.length) {
-          alert("Enter at least one URL to crawl (for example discord.com).");
+          alert("Enter at least one URL to crawl (for example https://example.org).");
           return;
         }
         const maxDepth = parseInt($("crawlMaxDepth").value, 10);
@@ -1167,6 +1232,7 @@
           alert("Max link depth must be between 0 and 50.");
           return;
         }
+        setCrawlActionLoading(btnCrawlTarget, true, "Crawling…");
         try {
           const res = await fetch("/crawl/target", {
             method: "POST",
@@ -1190,10 +1256,13 @@
           );
         } catch (e) {
           alert(String(e.message || e));
+        } finally {
+          setCrawlActionLoading(btnCrawlTarget, false);
         }
       });
 
-      $("btnSeedDefaults").addEventListener("click", async () => {
+      btnSeedDefaults.addEventListener("click", async () => {
+        setCrawlActionLoading(btnSeedDefaults, true, "Adding seeds…");
         try {
           const res = await fetch("/crawl/seed", { method: "POST" });
           const data = await res.json();
@@ -1202,6 +1271,8 @@
           alert(data.message || "Seeds enqueued.");
         } catch (e) {
           alert(String(e.message || e));
+        } finally {
+          setCrawlActionLoading(btnSeedDefaults, false);
         }
       });
 
