@@ -18,14 +18,110 @@ const { scheduler } = require('./crawler/scheduler');
 const { crawler } = require('./crawler/crawler');
 const { queryEngine } = require('./search/query');
 const { getFetchMode } = require('./crawler/crawlSettings');
+const { ProxyEngine } = require('./proxy/proxy');
+
+const proxyEngine = new ProxyEngine();
 
 if (process.env.AUTO_CRAWL === 'true') {
   initSeeds();
 }
 
 const app = express();
+app.set('trust proxy', 1);
+
+/** Proxy routes before other middleware so they are never shadowed. */
+app.use((req, res, next) => {
+  if (req.method !== 'GET') return next();
+  const p = req.path;
+  if (p === '/proxy' || p === '/proxy/') {
+    return handleProxy(req, res, {}).catch((err) => handleProxyError(res, req, err));
+  }
+  if (p === '/proxy/raw' || p === '/proxy/raw/') {
+    return handleProxy(req, res, { forceRaw: true }).catch((err) => handleProxyError(res, req, err));
+  }
+  next();
+});
+
 app.use(cors());
 app.use(express.json());
+
+function getBaseProxyUrl(req) {
+  return `${req.protocol}://${req.get('host')}`;
+}
+
+function isBinaryAssetPath(urlStr) {
+  try {
+    const pathname = new URL(urlStr).pathname;
+    return /\.(png|jpg|jpeg|gif|webp|ico|svg|woff|woff2|ttf|mp4|mp3|pdf)$/i.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
+function isCssPath(urlStr) {
+  try {
+    return /\.css$/i.test(new URL(urlStr).pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function handleProxy(req, res, opts = {}) {
+  const forceRaw = Boolean(opts.forceRaw);
+  try {
+    const rawParam = proxyEngine.decodeProxyUrl(req.query.url);
+    if (!rawParam || !/^https?:\/\//i.test(rawParam)) {
+      return res.status(400).type('text/plain').send('Invalid url');
+    }
+
+    const wantRaw = forceRaw || req.query.raw === '1';
+    if (wantRaw || isBinaryAssetPath(rawParam)) {
+      return proxyEngine.pipeRawResponse(rawParam, res);
+    }
+
+    if (isCssPath(rawParam)) {
+      const tr = await proxyEngine.fetchTextResource(rawParam);
+      if (!tr.ok) {
+        res.setHeader('X-Powered-By', 'TheEngine-Proxy');
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res
+          .status(502)
+          .send(proxyEngine.buildErrorPageHtml(rawParam, tr.error || 'fetch failed'));
+      }
+      const rewritten = proxyEngine.rewriteCss(tr.text, rawParam, getBaseProxyUrl(req));
+      res.setHeader('X-Powered-By', 'TheEngine-Proxy');
+      res.setHeader('Content-Type', 'text/css; charset=utf-8');
+      return res.send(rewritten);
+    }
+
+    const page = await proxyEngine.fetchPage(rawParam);
+    const finalUrl = page.finalUrl || rawParam;
+    const out = proxyEngine.rewriteHtml(page.html, finalUrl, getBaseProxyUrl(req));
+    res.setHeader('X-Powered-By', 'TheEngine-Proxy');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    if (page.isError) {
+      return res.status(502).send(out);
+    }
+    return res.send(out);
+  } catch (err) {
+    const fallbackUrl = proxyEngine.decodeProxyUrl(req.query.url) || '';
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('X-Powered-By', 'TheEngine-Proxy');
+    return res
+      .status(502)
+      .send(proxyEngine.buildErrorPageHtml(fallbackUrl, String(err.message || err)));
+  }
+}
+
+function handleProxyError(res, req, err) {
+  if (res.headersSent) return;
+  const fallbackUrl = proxyEngine.decodeProxyUrl(req.query.url) || '';
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('X-Powered-By', 'TheEngine-Proxy');
+  res
+    .status(502)
+    .send(proxyEngine.buildErrorPageHtml(fallbackUrl, String(err.message || err)));
+}
 
 function normalizeUserUrl(raw) {
   let s = String(raw || '').trim();
@@ -267,5 +363,6 @@ app.get('/crawl/status', (req, res) => {
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => {
   console.log(`[TheEngine] 🔍 Running at http://localhost:${port}`);
+  console.log(`[TheEngine] Proxy: GET /proxy, GET /proxy/raw`);
   scheduler.init();
 });

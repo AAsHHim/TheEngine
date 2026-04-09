@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- If the page is opened from a static preview (not node server.js), set content to your API origin, e.g. http://localhost:3000 -->
+  <meta name="theengine-api-base" content="" />
   <title>TheEngine — Self-Indexed Search</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -608,6 +610,98 @@
       .search-input { border: 1px solid #333; border-radius: 0; }
       .search-btn { width: 100%; border-radius: 0 0 4px 4px; }
     }
+
+    body.proxy-mode {
+      overflow: hidden;
+    }
+    body.proxy-mode .hero,
+    body.proxy-mode .results {
+      display: none !important;
+    }
+
+    .proxy-chrome {
+      display: none;
+      flex-direction: column;
+      position: fixed;
+      inset: 0;
+      z-index: 900;
+      background: var(--bg);
+    }
+    body.proxy-mode .proxy-chrome {
+      display: flex;
+    }
+
+    .proxy-toolbar {
+      flex-shrink: 0;
+      display: flex;
+      align-items: stretch;
+      gap: 0.5rem;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid #333;
+      background: #0d0d0d;
+    }
+    .proxy-back {
+      display: flex;
+      align-items: center;
+      padding: 0 0.75rem;
+      background: var(--panel);
+      border: 1px solid #333;
+      border-radius: 4px 0 0 4px;
+      color: var(--accent);
+      font-family: inherit;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+    .proxy-back:hover {
+      border-color: var(--accent);
+    }
+    .proxy-url-input {
+      flex: 1;
+      min-width: 0;
+      background: var(--panel);
+      border: 1px solid #333;
+      border-left: none;
+      border-right: none;
+      color: var(--fg);
+      font-family: inherit;
+      font-size: 0.9rem;
+      padding: 0.75rem 0.65rem;
+      outline: none;
+    }
+    .proxy-url-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent), 0 0 18px rgba(0, 255, 136, 0.25);
+    }
+    .proxy-go {
+      background: var(--panel);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      font-family: inherit;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      padding: 0 1rem;
+      cursor: pointer;
+      border-radius: 0 4px 4px 0;
+      text-transform: uppercase;
+      font-size: 0.8rem;
+    }
+    .proxy-go:hover {
+      background: rgba(0, 255, 136, 0.12);
+    }
+
+    .proxy-frame-wrap {
+      flex: 1;
+      min-height: 0;
+      position: relative;
+    }
+    .proxy-frame {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: none;
+      background: #fff;
+    }
   </style>
 </head>
 <body>
@@ -691,6 +785,25 @@
       </details>
     </section>
 
+    <div class="proxy-chrome" id="proxyChrome" aria-hidden="true">
+      <div class="proxy-toolbar">
+        <button type="button" class="proxy-back" id="btnProxySearch" title="Back to search">← Search</button>
+        <input
+          type="text"
+          id="proxyUrlInput"
+          class="proxy-url-input"
+          placeholder="https://…"
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="Proxy URL"
+        />
+        <button type="button" class="proxy-go" id="btnProxyGo">GO</button>
+      </div>
+      <div class="proxy-frame-wrap">
+        <iframe id="proxyFrame" class="proxy-frame" title="Proxied page"></iframe>
+      </div>
+    </div>
+
     <section class="results" id="results">
       <div class="toolbar">
         <button type="button" class="btn-ghost" id="btnNewSearch"><span class="back-chevron" aria-hidden="true"></span> New search</button>
@@ -747,7 +860,13 @@
       const widgetStatusDot = $("widgetStatusDot");
       const widgetStatusText = $("widgetStatusText");
       const widgetApiError = $("widgetApiError");
+      const proxyChrome = $("proxyChrome");
+      const proxyFrame = $("proxyFrame");
+      const proxyUrlInput = $("proxyUrlInput");
+      const btnProxyGo = $("btnProxyGo");
+      const btnProxySearch = $("btnProxySearch");
 
+      let proxyMode = false;
       let suggestItems = [];
       let activeIdx = -1;
       let suggestOpen = false;
@@ -782,6 +901,139 @@
           return s.length > 80 ? s.slice(0, 80) + "…" : s;
         }
       }
+
+      function normalizeUserUrl(raw) {
+        let s = String(raw || "").trim();
+        if (!s) return null;
+        if (!/^https?:\/\//i.test(s)) s = "https://" + s;
+        try {
+          const u = new URL(s);
+          if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+          u.hash = "";
+          return u.href;
+        } catch {
+          return null;
+        }
+      }
+
+      function getApiBase() {
+        const m = document.querySelector('meta[name="theengine-api-base"]');
+        let b = m && m.getAttribute("content");
+        if (b == null) b = "";
+        return String(b).trim().replace(/\/$/, "");
+      }
+
+      /** Same-origin /proxy when api base is empty; absolute URL when UI is on another port. */
+      function proxyUrlFor(targetUrl) {
+        const base = getApiBase();
+        return (base ? base : "") + "/proxy?url=" + encodeURIComponent(targetUrl);
+      }
+
+      function isProxyLinkHref(href) {
+        if (!href || href.indexOf("/proxy") === -1) return false;
+        try {
+          const u = new URL(href, window.location.href);
+          const path = u.pathname.replace(/\/$/, "") || "/";
+          if (path !== "/proxy") return false;
+          return Boolean(u.searchParams.get("url"));
+        } catch {
+          return href.indexOf("/proxy?url=") !== -1;
+        }
+      }
+
+      function applyProxyMode(targetUrl) {
+        proxyMode = true;
+        document.body.classList.add("proxy-mode");
+        if (proxyChrome) proxyChrome.setAttribute("aria-hidden", "false");
+        proxyFrame.src = proxyUrlFor(targetUrl);
+        proxyUrlInput.value = targetUrl;
+      }
+
+      function exitProxyModeUi() {
+        proxyMode = false;
+        document.body.classList.remove("proxy-mode");
+        if (proxyChrome) proxyChrome.setAttribute("aria-hidden", "true");
+        proxyFrame.src = "about:blank";
+      }
+
+      function enterProxyMode(targetUrl) {
+        applyProxyMode(targetUrl);
+        history.pushState(
+          { proxy: true, targetUrl: targetUrl },
+          "",
+          "?view=proxy&url=" + encodeURIComponent(targetUrl)
+        );
+      }
+
+      function goProxyFromBar() {
+        const n = normalizeUserUrl(proxyUrlInput.value);
+        if (!n) return;
+        enterProxyMode(n);
+      }
+
+      btnProxyGo.addEventListener("click", goProxyFromBar);
+      proxyUrlInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          goProxyFromBar();
+        }
+      });
+      btnProxySearch.addEventListener("click", () => {
+        exitProxyModeUi();
+        history.replaceState({}, "", location.pathname);
+      });
+
+      window.addEventListener("popstate", (e) => {
+        if (e.state && e.state.proxy && e.state.targetUrl) {
+          applyProxyMode(e.state.targetUrl);
+        } else {
+          exitProxyModeUi();
+        }
+      });
+
+      (function initProxyFromUrl() {
+        const sp = new URLSearchParams(location.search);
+        if (sp.get("view") === "proxy" && sp.get("url")) {
+          try {
+            const u = decodeURIComponent(sp.get("url"));
+            if (/^https?:\/\//i.test(u)) {
+              applyProxyMode(u);
+              history.replaceState(
+                { proxy: true, targetUrl: u },
+                "",
+                location.pathname + location.search
+              );
+            }
+          } catch (_) {}
+        }
+      })();
+
+      resultsBody.addEventListener("click", (e) => {
+        const a = e.target.closest("a");
+        if (!a || !a.getAttribute("href")) return;
+        const href = a.getAttribute("href");
+        if (!isProxyLinkHref(href)) return;
+        if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;
+        e.preventDefault();
+        let targetUrl;
+        try {
+          const u = new URL(href, window.location.href);
+          targetUrl = u.searchParams.get("url") || "";
+        } catch {
+          const q = href.indexOf("url=");
+          if (q === -1) return;
+          const rest = href.slice(q + 4);
+          const amp = rest.indexOf("&");
+          const encoded = amp === -1 ? rest : rest.slice(0, amp);
+          try {
+            targetUrl = decodeURIComponent(encoded);
+          } catch {
+            return;
+          }
+        }
+        if (!/^https?:\/\//i.test(targetUrl)) return;
+        enterProxyMode(targetUrl);
+      });
 
       function applyModeUi(mode, running) {
         const isAuto = mode === "auto";
@@ -1097,12 +1349,13 @@
               const desc = esc(r.description || "");
               const score = typeof r.score === "number" ? r.score.toFixed(3) : esc(r.score);
               const when = relTime(r.crawledAt);
+              const href = proxyUrlFor(r.url);
               return (
                 '<article class="result-card">' +
                 '<span class="score-badge">' + score + "</span>" +
                 '<h2 class="result-title"><a href="' +
-                url +
-                '" target="_blank" rel="noopener">' +
+                href +
+                '" rel="noopener">' +
                 title +
                 "</a></h2>" +
                 '<div class="result-url">' +
