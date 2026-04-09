@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "crawl": "node -e \"require('./crawler/crawlSettings').setAutoCrawl(true);\""
+    "crawl": "node -e \"const d=require('./db/database');d.setSetting('crawl_mode','auto');console.log('crawl_mode set to auto in the database. Run npm start — the scheduler will start when the server boots.');\""
   },
   "dependencies": {
     "express": "^4.18.2",

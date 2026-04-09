@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS crawl_queue (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   url        TEXT UNIQUE NOT NULL,
   priority   INTEGER DEFAULT 5,
+  depth      INTEGER NOT NULL DEFAULT 0,
   added_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
   attempted  INTEGER DEFAULT 0
 );
@@ -45,7 +46,41 @@ CREATE TABLE IF NOT EXISTS word_index (
   UNIQUE(word, page_id),
   FOREIGN KEY (page_id) REFERENCES pages(id)
 );
+
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `);
+
+const getSettingStmt = db.prepare('SELECT value FROM settings WHERE key = ?');
+const upsertSettingStmt = db.prepare(`
+  INSERT INTO settings (key, value) VALUES (@key, @value)
+  ON CONFLICT(key) DO UPDATE SET value = excluded.value
+`);
+
+function getSetting(key, defaultValue = null) {
+  const row = getSettingStmt.get(key);
+  if (!row) return defaultValue;
+  return row.value;
+}
+
+function setSetting(key, value) {
+  upsertSettingStmt.run({ key, value: String(value) });
+}
+
+if (getSetting('crawl_mode') == null) {
+  setSetting('crawl_mode', 'manual');
+}
+if (getSetting('crawl_max_depth') == null) {
+  setSetting('crawl_max_depth', '2');
+}
+
+try {
+  db.exec(`ALTER TABLE crawl_queue ADD COLUMN depth INTEGER NOT NULL DEFAULT 0`);
+} catch (e) {
+  if (!/duplicate column|already exists/i.test(String(e.message))) throw e;
+}
 
 const insertPageStmt = db.prepare(`
   INSERT INTO pages (url, title, description, body_text, status_code, content_hash)
@@ -83,26 +118,48 @@ function insertLink(fromUrl, toUrl) {
 }
 
 const enqueueStmt = db.prepare(`
-  INSERT OR IGNORE INTO crawl_queue (url, priority) VALUES (?, ?)
+  INSERT OR IGNORE INTO crawl_queue (url, priority, depth) VALUES (?, ?, ?)
 `);
 
-function enqueueUrl(url, priority = 5) {
-  enqueueStmt.run(url, priority);
+function enqueueUrl(url, priority = 5, depth = 0) {
+  enqueueStmt.run(url, priority, depth);
 }
 
-function enqueueUrls(urls, priority = 5) {
+function enqueueUrls(urls, priority = 5, depth = 0) {
   let inserted = 0;
   for (const raw of urls) {
     const u = String(raw || '').trim();
     if (!u) continue;
-    const info = enqueueStmt.run(u, priority);
+    const info = enqueueStmt.run(u, priority, depth);
     if (info.changes > 0) inserted += 1;
   }
   return inserted;
 }
 
+const upsertQueuePriorityStmt = db.prepare(`
+  INSERT INTO crawl_queue (url, priority, depth, attempted)
+  VALUES (@url, @priority, @depth, 0)
+  ON CONFLICT(url) DO UPDATE SET
+    priority = excluded.priority,
+    depth = excluded.depth
+`);
+
+function upsertQueueUrlsPriority(urls, priority, depth = 0) {
+  let n = 0;
+  const run = db.transaction((list) => {
+    for (const raw of list) {
+      const u = String(raw || '').trim();
+      if (!u) continue;
+      upsertQueuePriorityStmt.run({ url: u, priority, depth });
+      n += 1;
+    }
+  });
+  run(urls);
+  return n;
+}
+
 const getNextStmt = db.prepare(`
-  SELECT id, url, priority, attempted FROM crawl_queue
+  SELECT id, url, priority, depth, attempted FROM crawl_queue
   ORDER BY priority DESC, id ASC
   LIMIT 1
 `);
@@ -174,7 +231,7 @@ function suggestTitles(query, limit = 5) {
 function seedUrlsIfEmpty(urls, priority = 5) {
   const count = db.prepare('SELECT COUNT(*) AS c FROM crawl_queue').get().c;
   if (count > 0) return;
-  const insert = db.prepare('INSERT OR IGNORE INTO crawl_queue (url, priority) VALUES (?, ?)');
+  const insert = db.prepare('INSERT OR IGNORE INTO crawl_queue (url, priority, depth) VALUES (?, ?, 0)');
   const runMany = db.transaction((list) => {
     for (const u of list) {
       insert.run(u, priority);
@@ -184,7 +241,7 @@ function seedUrlsIfEmpty(urls, priority = 5) {
 }
 
 function reseedQueue(urls, priority = 5) {
-  const insert = db.prepare('INSERT OR IGNORE INTO crawl_queue (url, priority) VALUES (?, ?)');
+  const insert = db.prepare('INSERT OR IGNORE INTO crawl_queue (url, priority, depth) VALUES (?, ?, 0)');
   const runMany = db.transaction((list) => {
     for (const u of list) {
       insert.run(u, priority);
@@ -215,4 +272,7 @@ module.exports = {
   reseedQueue,
   getInboundLinkCount,
   selectPageIdByUrl,
+  getSetting,
+  setSetting,
+  upsertQueueUrlsPriority,
 };

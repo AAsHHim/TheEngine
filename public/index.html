@@ -302,7 +302,7 @@
       margin-bottom: 0.1em;
     }
 
-    .crawler-widget {
+    details.crawler-widget {
       position: fixed;
       right: 1rem;
       bottom: 1rem;
@@ -310,58 +310,231 @@
       background: #111;
       border: 1px solid #333;
       border-radius: 4px;
-      font-size: 0.75rem;
+      font-size: 0.72rem;
       max-width: min(92vw, 280px);
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+      color: var(--muted);
     }
-    .crawler-head {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.6rem 0.75rem;
+    details.crawler-widget:not([open]) {
+      min-width: 0;
+    }
+    .crawler-widget-summary {
+      list-style: none;
       cursor: pointer;
       user-select: none;
+      padding: 0.45rem 0.55rem;
+      display: block;
     }
-    .pulse-dot {
+    .crawler-widget-summary::-webkit-details-marker {
+      display: none;
+    }
+    .crawler-widget-summary-inner {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      min-height: 1.35rem;
+    }
+    .crawler-widget-summary-title {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      color: var(--fg);
+      flex-shrink: 0;
+    }
+    .crawler-widget-summary-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      margin-left: auto;
+      min-width: 0;
+      font-size: 0.62rem;
+      color: var(--muted);
+      max-width: 9rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .crawler-widget-summary .status-dot {
+      flex-shrink: 0;
+    }
+    .crawler-widget-chevron {
+      flex-shrink: 0;
+      width: 0.45rem;
+      height: 0.45rem;
+      border-right: 2px solid var(--accent);
+      border-bottom: 2px solid var(--accent);
+      transform: rotate(45deg);
+      opacity: 0.75;
+      transition: transform 0.2s ease;
+    }
+    details.crawler-widget[open] .crawler-widget-chevron {
+      transform: rotate(225deg);
+    }
+    details.crawler-widget[data-api-error="1"] .crawler-widget-summary-title {
+      color: var(--err);
+    }
+    .crawler-widget-body {
+      padding: 0 0.65rem 0.65rem;
+      border-top: 1px solid #222;
+    }
+    .crawler-widget-title {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: var(--fg);
+      margin-bottom: 0.55rem;
+      padding-top: 0.35rem;
+    }
+    .crawler-mode-row {
+      display: flex;
+      gap: 0.45rem;
+      margin-bottom: 0.6rem;
+    }
+    .mode-btn {
+      flex: 1;
+      font-family: inherit;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      padding: 0.4rem 0.35rem;
+      border-radius: 3px;
+      cursor: pointer;
+      border: 1px solid var(--accent);
+      background: transparent;
+      color: var(--accent);
+    }
+    .mode-btn:hover { opacity: 0.92; }
+    .mode-btn.active {
+      background: var(--accent);
+      color: #0a0a0a;
+      border-color: var(--accent);
+    }
+    .crawler-status-line {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      margin-bottom: 0.45rem;
+      font-size: 0.7rem;
+      color: var(--fg);
+    }
+    .status-dot {
       width: 8px;
       height: 8px;
       border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-dot.running {
       background: var(--accent);
       animation: pulse 1.5s ease infinite;
+    }
+    .status-dot.paused {
+      background: #555;
+      animation: none;
     }
     @keyframes pulse {
       0%, 100% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.45; transform: scale(0.9); }
     }
-    .crawler-body {
-      display: none;
-      padding: 0 0.75rem 0.75rem;
-      color: var(--muted);
-      border-top: 1px solid #222;
+    .crawler-widget .stat-line { margin-bottom: 0.25rem; }
+    .crawler-widget .widget-last {
+      word-break: break-all;
+      font-size: 0.68rem;
+      margin-bottom: 0.45rem;
     }
-    .crawler-widget.expanded .crawler-body { display: block; }
+    .widget-error {
+      color: var(--err);
+      font-size: 0.68rem;
+      margin: 0.35rem 0;
+    }
+    .btn-crawl-now {
+      width: 100%;
+      margin-top: 0.35rem;
+      font-family: inherit;
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 0.45rem 0.5rem;
+      border-radius: 3px;
+      cursor: pointer;
+      border: 1px solid var(--accent);
+      background: #0d0d0d;
+      color: var(--accent);
+    }
+    .btn-crawl-now:hover { background: rgba(0, 255, 136, 0.12); }
+    .btn-crawl-now:disabled { opacity: 0.55; cursor: wait; }
+    .btn-crawl-now.flash-ok {
+      background: var(--accent);
+      color: #0a0a0a;
+      border-color: var(--accent);
+      transition: background 0.2s, color 0.2s;
+    }
+    .btn-crawl-now[hidden] { display: none !important; }
 
-    .crawl-panel {
+    details.crawl-panel {
       width: 100%;
       max-width: 680px;
-      margin-top: 2rem;
-      padding: 1rem 1.1rem;
+      margin-top: 1.25rem;
       background: var(--panel);
       border: 1px solid #333;
       border-radius: 4px;
       text-align: left;
     }
-    .crawl-panel h2 {
-      margin: 0 0 0.75rem;
+    details.crawl-panel:not([open]) {
+      align-self: center;
+    }
+    .crawl-panel-summary {
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.55rem 0.85rem;
+      cursor: pointer;
+      user-select: none;
       font-size: 0.75rem;
       font-weight: 600;
       letter-spacing: 0.15em;
       text-transform: uppercase;
       color: var(--accent);
     }
+    .crawl-panel-summary::-webkit-details-marker {
+      display: none;
+    }
+    .crawl-panel-summary-left {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.2rem;
+      min-width: 0;
+    }
+    .crawl-panel-summary-hint {
+      font-size: 0.65rem;
+      font-weight: 400;
+      letter-spacing: 0.04em;
+      text-transform: none;
+      color: var(--muted);
+    }
+    .crawl-panel-chevron {
+      flex-shrink: 0;
+      width: 0.55rem;
+      height: 0.55rem;
+      border-right: 2px solid var(--accent);
+      border-bottom: 2px solid var(--accent);
+      transform: rotate(45deg);
+      margin-top: -0.2rem;
+      transition: transform 0.2s ease;
+      opacity: 0.85;
+    }
+    details.crawl-panel[open] .crawl-panel-chevron {
+      transform: rotate(225deg);
+      margin-top: 0.15rem;
+    }
+    .crawl-panel-body {
+      padding: 0 0.85rem 0.85rem;
+      border-top: 1px solid #222;
+    }
     .crawl-textarea {
       width: 100%;
-      min-height: 88px;
+      min-height: 72px;
       background: #0d0d0d;
       border: 1px solid #333;
       color: var(--fg);
@@ -384,6 +557,25 @@
       align-items: center;
       margin-bottom: 0.75rem;
     }
+    .crawl-depth-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.65rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .crawl-depth-row input[type="number"] {
+      width: 4rem;
+      background: #0d0d0d;
+      border: 1px solid #333;
+      color: var(--fg);
+      font-family: inherit;
+      font-size: 0.85rem;
+      padding: 0.35rem 0.45rem;
+      border-radius: 3px;
+    }
     .btn-crawl {
       background: #0d0d0d;
       border: 1px solid #444;
@@ -395,19 +587,13 @@
       border-radius: 3px;
     }
     .btn-crawl.primary {
+      font-weight: 600;
+    }
+    .btn-crawl:hover,
+    .btn-crawl:focus-visible {
       border-color: var(--accent);
       color: var(--accent);
     }
-    .btn-crawl:hover { border-color: var(--accent); color: var(--accent); }
-    .crawl-auto {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      font-size: 0.8rem;
-      color: var(--muted);
-      user-select: none;
-    }
-    .crawl-auto input { accent-color: var(--accent); }
     .crawl-help {
       font-size: 0.72rem;
       color: var(--muted);
@@ -464,30 +650,45 @@
       </div>
       <p class="tagline">No middlemen. Pages found by our crawler, ranked by us.</p>
 
-      <div class="crawl-panel" id="crawlPanel">
-        <h2>Crawl control</h2>
-        <textarea
-          id="crawlUrls"
-          class="crawl-textarea"
-          placeholder="https://example.com&#10;one URL per line — or enable Auto and use env seeds / Default seeds"
-          aria-label="URLs to crawl"
-        ></textarea>
-        <div class="crawl-actions">
-          <button type="button" class="btn-crawl primary" id="btnEnqueue">Add to queue</button>
-          <button type="button" class="btn-crawl" id="btnRunBatch">Run batch (3)</button>
-          <button type="button" class="btn-crawl" id="btnSeedDefaults">Default seeds</button>
-          <label class="crawl-auto">
-            <input type="checkbox" id="chkAutoCrawl" />
-            Auto crawl (background)
-          </label>
+      <details class="crawl-panel" id="crawlPanel">
+        <summary class="crawl-panel-summary">
+          <span class="crawl-panel-summary-left">
+            <span>Crawl control</span>
+            <span class="crawl-panel-summary-hint">Expand for URLs, depth &amp; Crawl</span>
+          </span>
+          <span class="crawl-panel-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="crawl-panel-body">
+          <p class="crawl-help" style="margin-top:0;margin-bottom:0.65rem;">
+            Your URLs are queued <strong>first</strong>. <strong>Crawl</strong> runs one batch now; use the widget for more batches or <strong>AUTO</strong> to keep going.
+          </p>
+          <textarea
+            id="crawlUrls"
+            class="crawl-textarea"
+            placeholder="discord.com&#10;https://example.org/page"
+            aria-label="Starting URLs to crawl"
+          ></textarea>
+          <div class="crawl-depth-row">
+            <label for="crawlMaxDepth">Max link depth</label>
+            <input type="number" id="crawlMaxDepth" min="0" max="50" value="2" />
+            <span>(0 = only these URLs; 1+ = follow links)</span>
+          </div>
+          <div class="crawl-actions">
+            <button type="button" class="btn-crawl primary" id="btnCrawlTarget">Crawl</button>
+            <button
+              type="button"
+              class="btn-crawl"
+              id="btnSeedDefaults"
+              title="Adds a built-in list of starter sites (Wikipedia, Hacker News, BBC News, Reddit r/technology, Stack Overflow, GitHub trending, arXiv, Wired, Ars, MDN) to the queue at normal priority — use when you want a broad seed set without typing URLs."
+            >
+              Default seeds
+            </button>
+          </div>
+          <p class="crawl-help">
+            <strong>Default seeds</strong> adds preset starter URLs (Wikipedia, HN, BBC, …) to the queue when missing. <strong>Auto</strong> (widget): timer. <strong>Next queue batch</strong>: next batch only. <code>playwright</code> vs <code>CRAWL_FETCH_MODE=http</code> on the server.
+          </p>
         </div>
-        <p class="crawl-help">
-          <strong>Manual:</strong> add URLs, then <em>Run batch</em> to process three at a time (no endless loop).
-          <strong>Auto:</strong> the scheduler keeps draining the queue on an interval.
-          <strong>Chromium</strong> (fetch mode <code>playwright</code>) runs a real browser so JavaScript-heavy pages index correctly.
-          Set <code>CRAWL_FETCH_MODE=http</code> on the server to use plain HTTP only — no browser binary, but many SPAs will be empty.
-        </p>
-      </div>
+      </details>
     </section>
 
     <section class="results" id="results">
@@ -499,17 +700,34 @@
     </section>
   </main>
 
-  <aside class="crawler-widget" id="crawlerWidget">
-    <div class="crawler-head" id="crawlerHead">
-      <span class="pulse-dot" aria-hidden="true"></span>
-      <span id="widgetModeLabel">CRAWLER</span>
-      <span style="margin-left:auto;color:var(--accent)" id="widgetPages">0</span>
+  <details class="crawler-widget" id="crawlerWidget" aria-label="Crawler control">
+    <summary class="crawler-widget-summary">
+      <span class="crawler-widget-summary-inner">
+        <span class="crawler-widget-summary-title">⚙ Crawler</span>
+        <span class="crawler-widget-summary-meta">
+          <span class="status-dot paused" id="widgetStatusDotSummary" aria-hidden="true"></span>
+          <span id="widgetCompactMeta">—</span>
+        </span>
+        <span class="crawler-widget-chevron" aria-hidden="true"></span>
+      </span>
+    </summary>
+    <div class="crawler-widget-body">
+      <div class="crawler-widget-title">⚙ CRAWLER CONTROL</div>
+      <div class="crawler-mode-row">
+        <button type="button" class="mode-btn" id="btnModeAuto" data-mode="auto">AUTO</button>
+        <button type="button" class="mode-btn" id="btnModeManual" data-mode="manual">MANUAL</button>
+      </div>
+      <div class="crawler-status-line">
+        <span class="status-dot paused" id="widgetStatusDot" aria-hidden="true"></span>
+        <span id="widgetStatusText">Status: ○ PAUSED</span>
+      </div>
+      <div class="stat-line">Indexed: <span class="accent" id="widgetIndexed">—</span> pages</div>
+      <div class="stat-line">Queue: <span class="accent" id="widgetQueue">—</span> URLs</div>
+      <div class="widget-last">Last: <span id="widgetLast">—</span></div>
+      <div class="widget-error" id="widgetApiError" hidden>⚠ API error</div>
+      <button type="button" class="btn-crawl-now" id="btnCrawlNow" hidden>Next queue batch</button>
     </div>
-    <div class="crawler-body" id="crawlerBody">
-      <div>Queue: <span id="widgetQueue">0</span></div>
-      <div style="margin-top:0.35rem;word-break:break-all;font-size:0.7rem;">Last: <span id="widgetLast">—</span></div>
-    </div>
-  </aside>
+  </details>
 
   <script>
     (function () {
@@ -523,12 +741,16 @@
       const resultsBody = $("resultsBody");
       const crawlerWidget = $("crawlerWidget");
       const crawlUrls = $("crawlUrls");
-      const chkAutoCrawl = $("chkAutoCrawl");
+      const btnModeAuto = $("btnModeAuto");
+      const btnModeManual = $("btnModeManual");
+      const btnCrawlNow = $("btnCrawlNow");
+      const widgetStatusDot = $("widgetStatusDot");
+      const widgetStatusText = $("widgetStatusText");
+      const widgetApiError = $("widgetApiError");
 
       let suggestItems = [];
       let activeIdx = -1;
       let suggestOpen = false;
-      let updatingAutoCheckbox = false;
 
       function fmtNum(n) {
         try { return Number(n).toLocaleString(); } catch { return String(n); }
@@ -550,89 +772,170 @@
         return w + " weeks ago";
       }
 
-      async function refreshStats() {
+      function hostDisplay(url) {
+        if (!url || url === "—") return "—";
         try {
-          const res = await fetch("/stats");
-          if (!res.ok) throw new Error("stats failed");
-          const data = await res.json();
-          $("statPages").textContent = fmtNum(data.pageCount);
-          $("statQueue").textContent = fmtNum(data.queueSize);
-          $("statMode").textContent = data.autoCrawl ? "AUTO" : "MANUAL";
-          $("statFetch").textContent = data.fetchMode || "—";
-          $("widgetPages").textContent = fmtNum(data.pageCount);
-          $("widgetQueue").textContent = fmtNum(data.queueSize);
-          $("widgetModeLabel").textContent = data.autoCrawl ? "AUTO" : "MANUAL";
-          if (typeof data.autoCrawl === "boolean") {
-            updatingAutoCheckbox = true;
-            chkAutoCrawl.checked = data.autoCrawl;
-            updatingAutoCheckbox = false;
-          }
-        } catch (_) { /* ignore */ }
-        try {
-          const res = await fetch("/crawl/status");
-          if (res.ok) {
-            const st = await res.json();
-            const last = st.lastCrawledUrl || "—";
-            $("widgetLast").textContent = last.length > 80 ? last.slice(0, 80) + "…" : last;
-          }
-        } catch (_) { /* ignore */ }
+          const h = new URL(url).hostname;
+          return h.length > 48 ? h.slice(0, 48) + "…" : h;
+        } catch {
+          const s = String(url);
+          return s.length > 80 ? s.slice(0, 80) + "…" : s;
+        }
       }
 
-      refreshStats();
-      setInterval(refreshStats, 5000);
+      function applyModeUi(mode, running) {
+        const isAuto = mode === "auto";
+        btnModeAuto.classList.toggle("active", isAuto);
+        btnModeManual.classList.toggle("active", mode === "manual");
+        const on = Boolean(running);
+        widgetStatusDot.classList.toggle("running", on);
+        widgetStatusDot.classList.toggle("paused", !on);
+        const sumDot = $("widgetStatusDotSummary");
+        if (sumDot) {
+          sumDot.classList.toggle("running", on);
+          sumDot.classList.toggle("paused", !on);
+        }
+        widgetStatusText.textContent = on ? "Status: ● RUNNING" : "Status: ○ PAUSED";
+        btnCrawlNow.hidden = isAuto;
+      }
 
-      crawlerWidget.querySelector("#crawlerHead").addEventListener("click", () => {
-        crawlerWidget.classList.toggle("expanded");
+      async function refreshCrawlUi() {
+        let stOk = false;
+        let statsOk = false;
+        try {
+          const res = await fetch("/crawl/status");
+          if (!res.ok) throw new Error("bad status");
+          const st = await res.json();
+          stOk = true;
+          const mode = st.mode === "auto" ? "auto" : "manual";
+          applyModeUi(mode, st.running);
+          const idx = typeof st.totalIndexed === "number" ? st.totalIndexed : st.pageCount;
+          $("widgetIndexed").textContent = typeof idx === "number" ? fmtNum(idx) : "—";
+          $("widgetQueue").textContent =
+            typeof st.queueSize === "number" ? fmtNum(st.queueSize) : "—";
+          const last = st.lastCrawledUrl || "—";
+          $("widgetLast").textContent =
+            last === "—" ? "—" : hostDisplay(last);
+          const compactMeta = $("widgetCompactMeta");
+          if (compactMeta) {
+            const mLabel = mode === "auto" ? "AUTO" : "MANUAL";
+            const qs =
+              typeof st.queueSize === "number" ? fmtNum(st.queueSize) : "—";
+            compactMeta.textContent = mLabel + " · Q " + qs;
+          }
+        } catch {
+          stOk = false;
+        }
+        try {
+          const res = await fetch("/stats");
+          if (!res.ok) throw new Error("bad stats");
+          const data = await res.json();
+          statsOk = true;
+          $("statPages").textContent = fmtNum(data.pageCount);
+          $("statQueue").textContent = fmtNum(data.queueSize);
+          $("statMode").textContent = data.crawlMode === "auto" || data.autoCrawl ? "AUTO" : "MANUAL";
+          $("statFetch").textContent = data.fetchMode || "—";
+        } catch {
+          statsOk = false;
+        }
+        const ok = stOk && statsOk;
+        widgetApiError.hidden = ok;
+        if (!ok) {
+          crawlerWidget.setAttribute("data-api-error", "1");
+        } else {
+          crawlerWidget.removeAttribute("data-api-error");
+        }
+      }
+
+      refreshCrawlUi();
+      setInterval(refreshCrawlUi, 5000);
+
+      async function postMode(mode) {
+        const res = await fetch("/crawl/mode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "mode failed");
+        await refreshCrawlUi();
+      }
+
+      btnModeAuto.addEventListener("click", () => {
+        postMode("auto").catch(() => {
+          widgetApiError.hidden = false;
+        });
       });
 
-      chkAutoCrawl.addEventListener("change", async () => {
-        if (updatingAutoCheckbox) return;
-        const auto = chkAutoCrawl.checked;
+      btnModeManual.addEventListener("click", () => {
+        postMode("manual").catch(() => {
+          widgetApiError.hidden = false;
+        });
+      });
+
+      btnCrawlNow.addEventListener("click", async () => {
+        btnCrawlNow.disabled = true;
+        const prev = btnCrawlNow.textContent;
+        btnCrawlNow.textContent = "…";
         try {
-          const res = await fetch("/crawl/mode", {
+          const res = await fetch("/crawl/now", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ auto }),
+            body: JSON.stringify({ batchSize: 3 }),
           });
-          if (!res.ok) throw new Error("mode failed");
-          await refreshStats();
-        } catch (e) {
-          chkAutoCrawl.checked = !auto;
-          alert(String(e.message || e));
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || "crawl failed");
+          if (data.skipped) {
+            alert(data.reason || "Already crawling");
+            await refreshCrawlUi();
+            return;
+          }
+          btnCrawlNow.classList.add("flash-ok");
+          setTimeout(() => btnCrawlNow.classList.remove("flash-ok"), 450);
+          await refreshCrawlUi();
+        } catch {
+          widgetApiError.hidden = false;
+        } finally {
+          btnCrawlNow.disabled = false;
+          btnCrawlNow.textContent = prev;
         }
       });
 
-      $("btnEnqueue").addEventListener("click", async () => {
+      $("btnCrawlTarget").addEventListener("click", async () => {
         const lines = crawlUrls.value
           .split(/\n/)
           .map((s) => s.trim())
           .filter(Boolean);
         if (!lines.length) {
-          alert("Add at least one URL.");
+          alert("Enter at least one URL to crawl (for example discord.com).");
+          return;
+        }
+        const maxDepth = parseInt($("crawlMaxDepth").value, 10);
+        if (!Number.isFinite(maxDepth) || maxDepth < 0 || maxDepth > 50) {
+          alert("Max link depth must be between 0 and 50.");
           return;
         }
         try {
-          const res = await fetch("/crawl/urls", {
+          const res = await fetch("/crawl/target", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ urls: lines }),
+            body: JSON.stringify({ urls: lines, maxDepth, batchSize: 3 }),
           });
           const data = await res.json();
-          if (!res.ok) throw new Error(data.error || "enqueue failed");
-          crawlUrls.value = "";
-          await refreshStats();
-          alert("Enqueued " + (data.enqueued || 0) + " URL(s).");
-        } catch (e) {
-          alert(String(e.message || e));
-        }
-      });
-
-      $("btnRunBatch").addEventListener("click", async () => {
-        try {
-          const res = await fetch("/crawl/run-batch", { method: "POST" });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || "batch failed");
-          await refreshStats();
+          if (!res.ok) throw new Error(data.error || "crawl failed");
+          if (data.skipped) {
+            alert(data.reason || "Crawler busy — try again in a moment.");
+            await refreshCrawlUi();
+            return;
+          }
+          await refreshCrawlUi();
+          alert(
+            "Queued your URL(s) first and crawled " +
+              (data.crawled || 0) +
+              " page(s) in this batch (max link depth " +
+              (data.maxDepth != null ? data.maxDepth : maxDepth) +
+              ")."
+          );
         } catch (e) {
           alert(String(e.message || e));
         }
@@ -643,7 +946,7 @@
           const res = await fetch("/crawl/seed", { method: "POST" });
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || "seed failed");
-          await refreshStats();
+          await refreshCrawlUi();
           alert(data.message || "Seeds enqueued.");
         } catch (e) {
           alert(String(e.message || e));

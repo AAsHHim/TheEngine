@@ -14,7 +14,7 @@ Copy `.env.example` to `.env`. Variables:
 
 - `PORT` — HTTP port (default `3000`).
 - `CRAWL_INTERVAL_MS` — delay between scheduler crawl batches in ms (default `5000`).
-- `AUTO_CRAWL` — `true` starts the background crawler on boot and seeds the default queue; `false` (default) leaves crawling off until you use the UI (**Auto crawl**), **Add to queue** + **Run batch**, or the API.
+- `AUTO_CRAWL` — `true` starts the background crawler on boot and seeds the default queue; `false` (default) leaves crawling off until you use the UI (**Auto crawl**), **Add to queue** + **Run batch**, or the API. Restarting the server re-applies `.env`: if `AUTO_CRAWL=true`, auto mode turns on again on boot; the UI toggle only affects the running process until you change `.env` or restart without that flag.
 - `CRAWL_FETCH_MODE` — `playwright` (default) uses headless Chromium so client-rendered pages can be indexed; `http` uses plain HTTP + Cheerio only (no browser install, but many JavaScript-heavy pages will look empty in the index).
 
 ## Why Chromium?

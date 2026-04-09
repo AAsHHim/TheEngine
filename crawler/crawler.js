@@ -11,6 +11,7 @@ const {
   removeFromQueue,
   selectPageIdByUrl,
   getStats,
+  getSetting,
 } = require('../db/database');
 const { indexer } = require('./indexer');
 
@@ -30,6 +31,12 @@ const BLOCKED_HOSTS = new Set([
 
 const DEFAULT_UA = 'TheEngine-Bot/1.0';
 
+function maxLinkDepthFromSettings() {
+  const raw = getSetting('crawl_max_depth', '2');
+  const n = parseInt(String(raw), 10);
+  return Number.isFinite(n) ? Math.max(0, Math.min(50, n)) : 2;
+}
+
 class WebCrawler {
   constructor(db, options = {}) {
     this.db = db;
@@ -47,6 +54,10 @@ class WebCrawler {
     this._robotsCache = new Map();
     this.lastCrawledUrl = null;
     this.currentlyCrawling = false;
+  }
+
+  get isCrawling() {
+    return this.currentlyCrawling;
   }
 
   async _ensureBrowser() {
@@ -257,18 +268,24 @@ class WebCrawler {
     this._domainLastFetch.set(h, Date.now());
   }
 
-  async crawlUrl(url) {
+  /**
+   * @param {string} url
+   * @param {number} [pageDepth] BFS depth for this URL (seeds are 0). Discovered links are enqueued at pageDepth+1 while pageDepth+1 <= crawl_max_depth setting.
+   */
+  async crawlUrl(url, pageDepth = 0) {
     const normalized = this.normalizeUrl(url);
     if (!normalized) {
       console.warn(`[TheEngine] Skip invalid URL: ${url}`);
-      return;
+      return null;
     }
+
+    const maxD = maxLinkDepthFromSettings();
 
     try {
       const allowed = await this.isAllowed(normalized);
       if (!allowed) {
         console.warn(`[TheEngine] robots.txt disallowed: ${normalized}`);
-        return;
+        return null;
       }
 
       const hostname = new URL(normalized).hostname;
@@ -282,7 +299,7 @@ class WebCrawler {
         html = fetched.html;
       } catch (err) {
         console.warn(`[TheEngine] crawl failed ${normalized}:`, err.message);
-        return;
+        return null;
       }
 
       const meta = this.extractMeta(html);
@@ -294,9 +311,12 @@ class WebCrawler {
       if (existing && existing.content_hash === contentHash) {
         for (const to of links) {
           insertLink(normalized, to);
-          enqueueUrl(to, 5);
+          if (pageDepth + 1 <= maxD) {
+            enqueueUrl(to, 5, pageDepth + 1);
+          }
         }
-        return;
+        this.lastCrawledUrl = normalized;
+        return normalized;
       }
 
       const pageId = insertPage(
@@ -310,7 +330,9 @@ class WebCrawler {
 
       for (const to of links) {
         insertLink(normalized, to);
-        enqueueUrl(to, 5);
+        if (pageDepth + 1 <= maxD) {
+          enqueueUrl(to, 5, pageDepth + 1);
+        }
       }
 
       indexer.indexPage(pageId, bodyText);
@@ -318,34 +340,73 @@ class WebCrawler {
       this.lastCrawledUrl = normalized;
       const stats = getStats();
       console.log(`[TheEngine] Crawled: ${normalized} | Pages indexed: ${stats.pageCount}`);
+      return normalized;
     } catch (err) {
       console.warn(`[TheEngine] crawlUrl error ${url}:`, err.message);
+      return null;
     }
   }
 
-  async crawlBatch(n = 5) {
-    const urls = [];
-    for (let i = 0; i < n; i++) {
-      const row = getNextInQueue();
-      if (!row) break;
-      markAttempted(row.url);
-      removeFromQueue(row.url);
-      urls.push(row.url);
+  /**
+   * @param {number} n
+   * @param {{ parallel?: boolean, shouldContinue?: () => boolean }} [options]
+   *   parallel (default true): dequeue all n then fetch in parallel (fast manual batches).
+   *   parallel false + shouldContinue: dequeue one URL at a time; stop between URLs when shouldContinue is false (auto loop obeys manual mode).
+   */
+  async crawlBatch(n = 5, options = {}) {
+    const parallel = options.parallel !== false;
+    const shouldContinueFn = typeof options.shouldContinue === 'function' ? options.shouldContinue : null;
+
+    if (parallel && !shouldContinueFn) {
+      const jobs = [];
+      for (let i = 0; i < n; i++) {
+        const row = getNextInQueue();
+        if (!row) break;
+        markAttempted(row.url);
+        removeFromQueue(row.url);
+        jobs.push({ url: row.url, depth: row.depth ?? 0 });
+      }
+      if (jobs.length === 0) return [];
+
+      this.currentlyCrawling = true;
+      const results = [];
+      try {
+        const out = await Promise.all(
+          jobs.map(({ url: u, depth: d }) =>
+            this.crawlUrl(u, d).catch((err) => {
+              console.warn(`[TheEngine] crawlUrl rejected ${u}:`, err.message);
+              return null;
+            })
+          )
+        );
+        for (const u of out) {
+          if (u) results.push({ url: u });
+        }
+        return results;
+      } finally {
+        this.currentlyCrawling = false;
+      }
     }
-    if (urls.length === 0) return;
 
     this.currentlyCrawling = true;
+    const results = [];
     try {
-      await Promise.all(
-        urls.map((u) =>
-          this.crawlUrl(u).catch((err) => {
-            console.warn(`[TheEngine] crawlUrl rejected ${u}:`, err.message);
-          })
-        )
-      );
+      for (let i = 0; i < n; i++) {
+        if (shouldContinueFn && !shouldContinueFn()) break;
+        const row = getNextInQueue();
+        if (!row) break;
+        markAttempted(row.url);
+        removeFromQueue(row.url);
+        const u = await this.crawlUrl(row.url, row.depth ?? 0).catch((err) => {
+          console.warn(`[TheEngine] crawlUrl rejected ${row.url}:`, err.message);
+          return null;
+        });
+        if (u) results.push({ url: u });
+      }
     } finally {
       this.currentlyCrawling = false;
     }
+    return results;
   }
 
   async close() {

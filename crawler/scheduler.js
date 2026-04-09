@@ -1,57 +1,105 @@
+const { getSetting, setSetting } = require('../db/database');
 const { crawler } = require('./crawler');
-const { getStats } = require('../db/database');
 
 class Scheduler {
-  constructor() {
+  constructor(crawlerInstance) {
+    this.crawler = crawlerInstance;
     this.running = false;
-    this.timer = null;
-    this.crawlIntervalMs = Number(process.env.CRAWL_INTERVAL_MS) || 5000;
+    this.intervalHandle = null;
+    this.lastCrawledUrl = null;
+    this.crawlCount = 0;
+    this._loopInProgress = false;
+  }
+
+  init() {
+    const mode = getSetting('crawl_mode', 'manual');
+    console.log(`[TheEngine] Crawl mode on startup: ${mode}`);
+    if (mode === 'auto') {
+      this.start();
+    } else {
+      console.log('[TheEngine] Manual mode — crawler is PAUSED. Use the UI or API to crawl.');
+    }
+  }
+
+  start() {
+    if (this.running) return;
+    if (this.intervalHandle) {
+      clearInterval(this.intervalHandle);
+      this.intervalHandle = null;
+    }
+    this.running = true;
+    setSetting('crawl_mode', 'auto');
+    const interval = Math.max(1000, parseInt(process.env.CRAWL_INTERVAL_MS || '5000', 10));
+    this.intervalHandle = setInterval(() => void this.loop(), interval);
+    console.log('[TheEngine] ✦ Auto-crawl STARTED');
+  }
+
+  stop() {
+    if (this.intervalHandle) {
+      clearInterval(this.intervalHandle);
+      this.intervalHandle = null;
+    }
+    if (this.running) {
+      console.log('[TheEngine] ⏸ Auto-crawl STOPPED — switched to manual mode');
+    }
+    this.running = false;
+    setSetting('crawl_mode', 'manual');
+  }
+
+  async crawlOnce(batchSize = 3) {
+    if (this.crawler.isCrawling) {
+      return { skipped: true, reason: 'Already crawling' };
+    }
+    const results = await this.crawler.crawlBatch(batchSize);
+    if (results.length > 0) {
+      this.lastCrawledUrl = results[results.length - 1].url;
+      this.crawlCount += results.length;
+    }
+    return { crawled: results.length, urls: results.map((r) => r.url) };
+  }
+
+  async loop() {
+    if (this._loopInProgress) return;
+    const mode = getSetting('crawl_mode', 'manual');
+    if (mode !== 'auto') {
+      this.stop();
+      return;
+    }
+    if (this.crawler.isCrawling) return;
+    this._loopInProgress = true;
+    try {
+      const results = await this.crawler.crawlBatch(3, {
+        parallel: false,
+        shouldContinue: () => getSetting('crawl_mode', 'manual') === 'auto',
+      });
+      if (getSetting('crawl_mode', 'manual') !== 'auto') {
+        this.stop();
+        return;
+      }
+      if (results.length > 0) {
+        this.lastCrawledUrl = results[results.length - 1].url;
+        this.crawlCount += results.length;
+      }
+    } finally {
+      this._loopInProgress = false;
+    }
+  }
+
+  getStatus() {
+    return {
+      mode: getSetting('crawl_mode', 'manual'),
+      running: this.running,
+      lastCrawledUrl: this.lastCrawledUrl,
+      crawlCount: this.crawlCount,
+    };
   }
 
   isRunning() {
     return this.running;
   }
-
-  start() {
-    if (this.running) return;
-    this.running = true;
-    this._scheduleTick(0);
-  }
-
-  stop() {
-    this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
-  }
-
-  _scheduleTick(delayMs) {
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => this._tick(), delayMs);
-  }
-
-  async _tick() {
-    if (!this.running) return;
-
-    const { queueSize } = getStats();
-    if (queueSize === 0) {
-      console.log('[TheEngine] Queue empty, waiting...');
-      this._scheduleTick(30000);
-      return;
-    }
-
-    try {
-      await crawler.crawlBatch(3);
-    } catch (err) {
-      console.warn('[TheEngine] crawlBatch error:', err.message);
-    }
-
-    this._scheduleTick(this.crawlIntervalMs);
-  }
 }
 
-const scheduler = new Scheduler();
+const scheduler = new Scheduler(crawler);
 
 module.exports = {
   Scheduler,
