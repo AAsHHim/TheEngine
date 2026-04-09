@@ -1,3 +1,8 @@
+/** Undici (pulled in by axios 1.15+) expects global File; Node 18 exposes it from buffer only. */
+if (typeof globalThis.File === 'undefined') {
+  globalThis.File = require('node:buffer').File;
+}
+
 require('dotenv').config();
 
 const path = require('path');
